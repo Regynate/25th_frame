@@ -41,7 +41,8 @@ def format_time(frame_i, fps):
     return f'{int(time // 3600)}:{int((time // 60) % 60):02d}:{int(time % 60):02d}.{int((frame_i+1) % fps)}'
 
 def add_timestamp(frame, i, fps):
-    draw_text(frame, format_time(i, fps), (100, 150), cv.FONT_HERSHEY_SIMPLEX, 5, 6)
+    h, w, _ = frame.shape
+    draw_text(frame, format_time(i, fps), (int(h / 10), int(w / 10)), cv.FONT_HERSHEY_SIMPLEX, max(1, int(h / 200)), 6)
 
 def resize(frame, width):
     h, w, _ = frame.shape
