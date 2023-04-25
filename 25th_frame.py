@@ -298,9 +298,9 @@ class FramesFinder:
 
 
 def main():
-    filename = input("Enter file path\n")
+    filename = input("Enter file path\n").strip('"')
     while not os.path.isfile(filename):
-        filename = input("No such file, try again\n")
+        filename = input("No such file, try again\n").strip('"')
 
     capture = cv.VideoCapture(filename)
 
