@@ -8,16 +8,17 @@ import time
 import sys
 import os
 import subprocess as sp
+from threading import Thread
 
 def current_time():
     return round(time.time() * 1000)
 
 def mse(img1, img2):
-   h, w, _ = img1.shape
+   h, w = img1.shape
    diff = cv.absdiff(img1, img2)
-   err = np.sum(diff**2)
+   err = np.sum(diff.astype(np.uint16)**2)
    mse = err/(float(h*w))
-   return mse, diff
+   return np.sqrt(mse), diff
 
 def draw_text(img, text,
           pos=(0, 0),
@@ -182,51 +183,65 @@ def show(capture, frames):
     window.mainloop()
     return [frames[i] + 1 for i in filter(lambda f: patched[f], range(cnt))], should_patch
 
-def main():
-    filename = input("Enter file path\n")
-    while not os.path.isfile(filename):
-        filename = input("No such file, try again\n")
+class FramesFinder:
+    def __init__(self, capture, filename):
+        self.stopped = False
+        self.capture = capture
 
-    capture = cv.VideoCapture(filename)
-
-    frame_count = int(capture.get(cv.CAP_PROP_FRAME_COUNT))
-    fps = capture.get(cv.CAP_PROP_FPS)
-
-    buffer = deque()
-    i = 0
-    broken_frames = []
-    try:
-        f = open(filename + '-frames.txt', 'r')
+        self.buffer = deque()
+        i = 0
+        self.broken_frames = []
         try:
-            broken_frames.extend(int(i) for i in f.readlines())
-            i = broken_frames[-1]
-            capture.set(cv.CAP_PROP_POS_FRAMES, i)
-        finally:
-            f.close()
-    except Exception:
-        pass
+            f = open(filename + '-frames.txt', 'r')
+            try:
+                self.broken_frames.extend(int(i) for i in f.readlines())
+                i = self.broken_frames[-1]
+                capture.set(cv.CAP_PROP_POS_FRAMES, i)
+            finally:
+                f.close()
+        except Exception:
+            pass
+
+        if len(self.broken_frames) == 0 or self.broken_frames[-1] != -1:
+            
+            self.f = open(filename + '-frames.txt', 'a')
+
+            self.thread = Thread(target=self.read_frames, args=(i,))
+            self.thread.daemon = True
+            self.thread.start()
+
+            self.process_frames()
+
+            self.f.close()
+            print()
     
-    if len(broken_frames) == 0 or broken_frames[-1] != -1:
+    def read_frames(self, i):
+        frame_count = int(self.capture.get(cv.CAP_PROP_FRAME_COUNT))
+        fps = self.capture.get(cv.CAP_PROP_FPS)
         deltatime = 0
         speed = 1
         deltaframes = 0
-        f = open(filename + '-frames.txt', 'a')
+
         while True:
             start_time = current_time()
-            success, frame = capture.read()
+            success, frame = self.capture.read()
             if not success:
-                f.write('-1\n')
+                self.stopped = True
+                self.f.write('-1\n')
                 break
+
+            #print('read', i)
+
+            #print('read', current_time() - start_time)
             
-            buffer.append(frame)
-            if len(buffer) == 4:
-                buffer.popleft()
-                diff01 = mse(buffer[0], buffer[1])[0]
-                if diff01 > 100:
-                    diff02 = mse(buffer[0], buffer[2])[0]
-                    if diff01 - diff02 > diff01 / 3:
-                        f.write(f'{i-2}\n')
-                        broken_frames.append(i-2)
+            frame = resize(frame, 320)
+            frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+            self.buffer.append((frame, i))
+
+            while (len(self.buffer) > 100):
+                #print('read', 'slept for 10 ms')
+                time.sleep(0.01)
             
             dtime = current_time() - start_time
             deltatime += dtime
@@ -236,11 +251,63 @@ def main():
                 deltatime = 0
                 deltaframes = 0
 
-            print(f'Frame={i}/{frame_count} time={format_time(i, fps)} speed={speed:.2f}x ETA={format_time((frame_count-i) / speed, fps)} broken={len(broken_frames)}  ', end='\r')
+            if i % 20 == 0:
+                print(f'\x1b[1K\rFrame={i}/{frame_count}\ttime={format_time(i, fps)}\tspeed={speed:.2f}x\tETA={format_time((frame_count-i) / speed, fps)}\tbroken={len(self.broken_frames)}', end='')
+            
             i += 1
-        f.close()
-        print()
+    
+    def process_frames(self):
+        while not self.stopped or len(self.buffer) > 2:
+            while len(self.buffer) < 3 and not self.stopped:
+                #print('process', 'slept for 10 ms')
+                time.sleep(0.01)
 
+            #start_time = current_time()
+
+            if self.stopped:
+                break
+
+            frame0, i = self.buffer[0]
+            frame1 = self.buffer[1][0]
+            frame2 = self.buffer[2][0]
+
+            diff01, pic01 = mse(frame0, frame1)
+
+            if diff01 > 20:
+                diff02, pic02 = mse(frame0, frame2)
+
+                #print(i, diff01, diff02, diff12)
+                #cv.imshow('Preview', 
+                #          cv.vconcat(
+                #    [cv.hconcat([frame0, frame1, frame2]),
+                #     cv.hconcat([pic01, pic02, pic12])]
+                #          )
+                #          )
+                #while not cv.waitKey(25) & 0xFF == ord('q'):
+                #    time.sleep(0.1)
+                
+                d = diff01 / 4
+
+                if abs(diff01 - diff01) < d and diff02 < 3 * d:
+                    self.f.write(f'{i}\n')
+                    self.f.flush()
+                    self.broken_frames.append(i)
+            self.buffer.popleft()
+
+            #print('process', current_time() - start_time)
+
+
+def main():
+    filename = input("Enter file path\n")
+    while not os.path.isfile(filename):
+        filename = input("No such file, try again\n")
+
+    capture = cv.VideoCapture(filename)
+
+    finder = FramesFinder(capture, filename)
+
+    broken_frames = finder.broken_frames
+    
     if len(broken_frames) > 0 and broken_frames[-1] == -1:
         broken_frames = broken_frames[:-1]
 
@@ -250,6 +317,7 @@ def main():
         return
     patched_frames, should_patch = show(capture, broken_frames)
     if len(patched_frames) > 0 and should_patch:
+        """
         ffmpegCommand = ['ffmpeg',
         '-y',
         '-f', 'rawvideo',
@@ -281,6 +349,7 @@ def main():
         proc.stdin.close()
         proc.stderr.close()
         proc.wait()
+        """
     elif len(patched_frames) > 0:
         pass
     else:
