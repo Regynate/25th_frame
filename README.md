@@ -1,5 +1,5 @@
 # 25th_frame
-A tool to detect broken frames in videos
+A tool to detect stray frames in videos
 
 # Installation
 Download the latest release [here](https://github.com/Reguas/25th_frame/releases/latest/download/25th_frame.exe)
@@ -19,3 +19,6 @@ The "View" button is used to preview the fragment in slow-motion
 
 # TODO
 Add frame patching with lossless quality
+
+# Note
+I made this tool in two hours on the knee, so don't expect much from it. The code quality might seem garbage, and it actually is. GLHF
